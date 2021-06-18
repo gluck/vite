@@ -1,4 +1,3 @@
-import { promises as fs } from 'fs'
 import path from 'path'
 import getEtag from 'etag'
 import * as convertSourceMap from 'convert-source-map'
@@ -77,7 +76,7 @@ export async function transformRequest(
     // like /service-worker.js or /api/users
     if (options.ssr || isFileAccessAllowed(file, config.server.fsServe)) {
       try {
-        code = await fs.readFile(file, 'utf-8')
+        code = (config as any).$fs$readFileSync(file, 'utf-8')
         isDebug && debugLoad(`${timeFrom(loadStart)} [fs] ${prettyUrl}`)
       } catch (e) {
         if (e.code !== 'ENOENT') {

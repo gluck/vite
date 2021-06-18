@@ -6,6 +6,7 @@ import typescript from '@rollup/plugin-typescript'
 import commonjs from '@rollup/plugin-commonjs'
 import json from '@rollup/plugin-json'
 import alias from '@rollup/plugin-alias'
+import replace from '@rollup/plugin-replace'
 import license from 'rollup-plugin-license'
 import MagicString from 'magic-string'
 import chalk from 'chalk'
@@ -67,7 +68,7 @@ const sharedNodeOptions = {
     entryFileNames: `[name].js`,
     chunkFileNames: 'chunks/dep-[hash].js',
     exports: 'named',
-    format: 'cjs',
+    format: 'esm',
     externalLiveBindings: false,
     freeze: false,
     sourcemap: true
@@ -88,30 +89,122 @@ const sharedNodeOptions = {
   }
 }
 
+const aliases = {
+  chalk: `const p = new Proxy(s=>s, { get() {return p;}});export default p;`,
+  debug: `export default function debug() {return () => {}}`,
+  // os: `export default {platform: () => 'linux'}`,
+  // path: `import * as path from 'path-browserify';export default path;export * from 'path-browserify'`,
+  // process: `export default {platform: 'linux'}`,
+  // picomatch: 'export default function () { return () => false; }',
+  'fast-glob': 'export default { sync: () => [] }',
+  'builtin-modules': 'export default []',
+  url: 'const URL = globalThis.URL;function parse(s) {return new URL(s[0]==="/" ? "file://"+s : s)};function pathToFileURL(s) {throw new Error(s);};export { URL, parse, pathToFileURL}',
+  'postcss-load-config': 'export default () => {throw new Error("No PostCSS Config found")}',
+  fs: `const readFileSync = () => '';const existsSync = () => false;const promises = { readFile: readFileSync, exists: existsSync };export { readFileSync, existsSync, promises };export default {readFileSync, existsSync, promises}`,
+  esbuild: `
+  import {
+    initialize,
+    transform as _transform,
+    build as _build
+  } from 'esbuild-wasm';
+  export {
+    TransformResult,
+    TransformOptions,
+    BuildResult,
+    BuildOptions,
+    Message,
+    Loader,
+    ImportKind,
+    Plugin,
+  } from 'esbuild-wasm';
+  
+  const init$ = initialize({
+    wasmURL: 'https://unpkg.com/esbuild-wasm@${
+      require('esbuild-wasm/package.json').version
+    }/esbuild.wasm',
+  });
+  
+  export function transform(input,options) {
+    return init$.then(() => _transform(input, options));
+  }
+  
+  export function build(options) {
+    return init$.then(() => _build(options));
+  }
+  `,
+  sirv: 'export default function () {}',
+  // '@rollup/plugin-commonjs': 'export default function () {}'
+}
+
+const pkgJson = require('./package.json');
+
 /**
  * @type { import('rollup').RollupOptions }
  */
 const nodeConfig = {
   ...sharedNodeOptions,
   input: {
-    index: path.resolve(__dirname, 'src/node/index.ts'),
-    cli: path.resolve(__dirname, 'src/node/cli.ts')
+    slim: path.resolve(__dirname, 'src/node/slim.ts')
   },
   external: [
-    'fsevents',
-    ...Object.keys(require('./package.json').dependencies)
+    'fsevents', 'sass'
   ],
   plugins: [
+    {
+      name: 'vite:slim',
+      resolveId: (id, importer) => {
+        if (id in aliases) {
+          return `$slim$${id}`
+        } else if (id in pkgJson.dependencies) {
+          return {
+            id,
+            external: true
+          }
+        }
+      },
+      load: (id) => {
+        if (id.startsWith('$slim$')) {
+          return aliases[id.slice(6)]
+        }
+      },
+      transform: (code, id) => {
+        const ms = new MagicString(code)
+        return {
+          map: ms.generateMap(),
+          code: 
+          code
+            // .replace(/require\.resolve/g, '(function (s) {return s;})')
+            .replace(
+              /(os\.platform\(\)|process\.platform)\s*===\s*'win32'/g,
+              'false'
+            )
+            // .replace(/require\('url'\)/g, '({})')
+            .replace(/require\('pnpapi'\)/g, 'undefined')
+            .replace(/options\.ssr/g, 'false')
+            .replace(/path\.posix/g, 'path')
+            .replace(/require\.resolve\('(vite\/)/g, '(\'$1'),
+            }
+        
+      }
+    },
+    replace({
+      preventAssignment: true,
+      values: {
+        'process.env.DEBUG': 'false'
+      }
+    }),
     alias({
       // packages with "module" field that doesn't play well with cjs bundles
       entries: {
-        '@vue/compiler-dom': require.resolve(
-          '@vue/compiler-dom/dist/compiler-dom.cjs.js'
-        ),
         'big.js': require.resolve('big.js/big.js')
       }
     }),
-    nodeResolve({ preferBuiltins: true }),
+    nodeResolve({
+      mainFields: ['module', 'jsnext:main', 'browser'],
+      preferBuiltins: true,
+      exportConditions: ['browser', 'default', 'module', 'import'],
+      dedupe: ['postcss']
+    }),
     typescript({
       target: 'es2019',
       include: ['src/**/*.ts'],
@@ -155,7 +248,10 @@ const nodeConfig = {
       bufferutil: 1,
       'utf-8-validate': 1
     }),
-    commonjs({ extensions: ['.js'] }),
+    commonjs({
+      transformMixedEsModules: true,
+      requireReturnsDefault: 'auto'
+    }),
     json(),
     licensePlugin()
   ]
@@ -233,7 +329,7 @@ function shimDepsPlugin(deps) {
       if (!err) {
         for (const file in deps) {
           if (!transformed[file]) {
-            this.error(
+            this.warn(
               `Did not find "${file}" which is supposed to be shimmed, was the file renamed?`
             )
           }
@@ -341,4 +437,5 @@ function licensePlugin() {
   })
 }
 
-export default [envConfig, clientConfig, nodeConfig, terserConfig]
+// export default [envConfig, clientConfig, nodeConfig, terserConfig]
+export default [nodeConfig]

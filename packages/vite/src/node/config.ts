@@ -629,7 +629,7 @@ export function mergeConfig(
   return mergeConfigRecursively(a, b, isRoot ? '' : '.')
 }
 
-function mergeAlias(a: AliasOptions = [], b: AliasOptions = []): Alias[] {
+export function mergeAlias(a: AliasOptions = [], b: AliasOptions = []): Alias[] {
   return [...normalizeAlias(a), ...normalizeAlias(b)]
 }
 

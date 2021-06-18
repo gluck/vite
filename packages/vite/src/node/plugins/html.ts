@@ -1,4 +1,3 @@
-import fs from 'fs'
 import path from 'path'
 import { Plugin } from '../plugin'
 import { ViteDevServer } from '../server'
@@ -50,7 +49,7 @@ export function htmlInlineScriptProxyPlugin(): Plugin {
       if (proxyMatch) {
         const index = Number(proxyMatch[1])
         const file = cleanUrl(id)
-        const html = fs.readFileSync(file, 'utf-8').replace(htmlCommentRE, '')
+        const html = (this as any).$fs$readFileSync(file, 'utf-8').replace(htmlCommentRE, '')
         let match
         scriptModuleRE.lastIndex = 0
         for (let i = 0; i <= index; i++) {
